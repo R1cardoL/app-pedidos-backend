@@ -1,30 +1,55 @@
+import {service} from '@loopback/core';
 import {
   Count,
   CountSchema,
   Filter,
   FilterExcludingWhere,
   repository,
-  Where,
+  Where
 } from '@loopback/repository';
 import {
-  post,
-  param,
-  get,
-  getModelSchemaRef,
-  patch,
-  put,
-  del,
-  requestBody,
-  response,
+  del, get,
+  getModelSchemaRef, HttpErrors, param, patch, post, put, requestBody,
+  response
 } from '@loopback/rest';
-import {Persona} from '../models';
+import {Credenciales, Persona} from '../models';
 import {PersonaRepository} from '../repositories';
+import {AutenticacionService} from '../services';
+const fetch = require('node-fetch');
 
 export class PersonaController {
   constructor(
     @repository(PersonaRepository)
     public personaRepository : PersonaRepository,
+    @service(AutenticacionService)
+    public servicioAutenticacion : AutenticacionService
   ) {}
+
+  @post('/identificarPersona',{
+    responses: {
+     '200':{
+      description: 'Identificacion de usuarios'
+    }
+  }
+  })
+  async identificarPersona(
+    @requestBody() credenciales : Credenciales
+   ){
+      let p = await this.servicioAutenticacion.IdentificarPersona(credenciales.usuario, credenciales.clave);
+      if(p){
+        let token = this.servicioAutenticacion.GenerarTokenJWT(p);
+        return{
+          datos:{
+            nombre: p.nombres,
+            correo: p.correo,
+            id: p.id
+          },
+          tk: token
+        }
+      }else{
+        throw new HttpErrors[401]('Datos inválidos');
+      }
+  }
 
   @post('/personas')
   @response(200, {
@@ -44,7 +69,20 @@ export class PersonaController {
     })
     persona: Omit<Persona, 'id'>,
   ): Promise<Persona> {
-    return this.personaRepository.create(persona);
+    let clave = this.servicioAutenticacion.GenerarClave();
+    let claveCifrada = this. servicioAutenticacion.CifrarClave(clave);
+    persona.clave = claveCifrada
+    let p = await this.personaRepository.create(persona);
+
+    //Notificar al usuario
+    let destino = persona.correo;
+    let asunto = 'Credenciales de acceso al sistema';
+    let contenido = `Hola, ${persona.nombres}, su usuario es ${persona.correo}, y la contraseña es ${clave}`;
+    fetch(`http:127.0.0.1:5000/email?correo_destino=${destino},&asunto=${asunto}&contenido=${contenido}`)
+    .then((data:any)=>{
+      console.log(data);
+    })
+    return p;
   }
 
   @get('/personas/count')
